@@ -121,6 +121,43 @@ def validate_container_name(name: str, prefix: Optional[str] = None) -> bool:
     
     return True
 
+def validate_existing_container(container_id_or_name: str) -> bool:
+    """Validate that a container exists and is accessible.
+    
+    Args:
+        container_id_or_name: The container ID or name to validate
+        
+    Returns:
+        True if valid and exists, otherwise raises ValueError
+        
+    Raises:
+        ValueError: If the container doesn't exist or is not accessible
+    """
+    try:
+        # First validate the format
+        if container_id_or_name.isdigit() and (len(container_id_or_name) == 12 or len(container_id_or_name) == 64):
+            validate_container_id(container_id_or_name)
+        else:
+            # Basic name validation without prefix since we don't know the type
+            if not re.match(r'^[a-zA-Z0-9_-]+$', container_id_or_name):
+                raise ValueError(f"Invalid container name format: {container_id_or_name}")
+        
+        # Check if container exists using docker/nerdctl inspect
+        runtime = get_container_runtime()
+        inspect_cmd = [runtime, "inspect", container_id_or_name]
+        
+        result = subprocess.run(inspect_cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            raise ValueError(f"Container {container_id_or_name} not found or not accessible")
+        
+        return True
+        
+    except subprocess.SubprocessError as e:
+        raise ValueError(f"Failed to validate container {container_id_or_name}: {str(e)}")
+    except FileNotFoundError:
+        raise ValueError("Container runtime (Docker/nerdctl) not found")
+
 # ============================================================================
 # PYDANTIC MODELS FOR STRUCTURED OUTPUT
 # ============================================================================
@@ -230,21 +267,21 @@ def create_gnb(link_ip: str = "127.0.0.1",
         validate_ip(amf_address)
         
         # Get container runtime (docker or nerdctl)
-        runtime = get_container_runtime()
+        container_runtime = get_container_runtime()
         
         # Create container command
-        cmd = [runtime, "run", "-d"]
-        
+        terminal_command = [container_runtime, "run", "-d"]
+
         # Add name if specified, otherwise generate one
         if container_name:
             validate_container_name(container_name, "gnb")
-            cmd.extend(["--name", container_name])
+            terminal_command.extend(["--name", container_name])
         else:
             container_name = f"gnb-{generate_random_suffix()}"
-            cmd.extend(["--name", container_name])
-            
+            terminal_command.extend(["--name", container_name])
+
         # Add environment variables
-        cmd.extend([
+        terminal_command.extend([
             "-e", f"LINK_IP={link_ip}",
             "-e", f"NGAP_IP={ngap_ip}",
             "-e", f"GTP_IP={gtp_ip}",
@@ -254,8 +291,8 @@ def create_gnb(link_ip: str = "127.0.0.1",
         ])
         
         # Execute command
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
+        result = subprocess.run(terminal_command, capture_output=True, text=True)
+
         if result.returncode != 0:
             return GnbCreateResponse(
                 status="error",
@@ -285,7 +322,8 @@ def create_gnb(link_ip: str = "127.0.0.1",
                 amf_port=amf_port
             )
         )
-    except Exception as e:
+    except ValueError as e:
+        # Validation errors from validate_ip() or validate_container_name()
         return GnbCreateResponse(
             status="error",
             container_id="",
@@ -299,6 +337,27 @@ def create_gnb(link_ip: str = "127.0.0.1",
             ),
             message=str(e)
         )
+    except Exception as e:
+        # Handle container creation failures and other unexpected errors
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            error_msg = "Container runtime (Docker/nerdctl) not found or not accessible"
+        elif "permission" in error_msg.lower():
+            error_msg = f"Permission denied: {error_msg}"
+        
+        return GnbCreateResponse(
+            status="error",
+            container_id="",
+            container_name="",
+            configuration=GnbConfiguration(
+                link_ip=link_ip,
+                ngap_ip=ngap_ip,
+                gtp_ip=gtp_ip,
+                amf_address=amf_address,
+                amf_port=amf_port
+            ),
+            message=error_msg
+        )
 
 
 @mcp.tool()
@@ -309,14 +368,14 @@ def list_gnbs() -> GnbListResponse:
         GnbListResponse: List of gNB containers
     """
     try:
-        runtime = get_container_runtime()
-        cmd = [
-            runtime, "ps", "-a", "--filter", "label=ueransim.type=gnb", 
+        container_runtime = get_container_runtime()
+        terminal_command = [
+            container_runtime, "ps", "-a", "--filter", "label=ueransim.type=gnb", 
             "--format", "{{.ID}}|{{.Names}}|{{.Status}}|{{.CreatedAt}}"
         ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
+
+        result = subprocess.run(terminal_command, capture_output=True, text=True)
+
         if result.returncode != 0:
             return GnbListResponse(
                 status="error",
@@ -342,11 +401,20 @@ def list_gnbs() -> GnbListResponse:
             count=len(containers)
         )
     except Exception as e:
+        # Handle all errors with smart error message detection
+        error_msg = str(e)
+        if "not found" in error_msg.lower() or "command not found" in error_msg.lower():
+            error_msg = "Container runtime (Docker/nerdctl) not found"
+        elif "permission" in error_msg.lower():
+            error_msg = f"Permission denied: {error_msg}"
+        elif "invalid" in error_msg.lower() or "format" in error_msg.lower():
+            error_msg = f"Output parsing error: {error_msg}"
+        
         return GnbListResponse(
             status="error",
             containers=[],
             count=0,
-            message=str(e)
+            message=error_msg
         )
 
 
@@ -368,10 +436,10 @@ def delete_gnb(container_id_or_name: str) -> GnbOperationResponse:
             validate_container_name(container_id_or_name, "gnb")
             
         # Get container runtime
-        runtime = get_container_runtime()
-        
+        container_runtime = get_container_runtime()
+
         # Stop and remove container
-        stop_cmd = [runtime, "stop", container_id_or_name]
+        stop_cmd = [container_runtime, "stop", container_id_or_name]
         result = subprocess.run(stop_cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
@@ -380,8 +448,8 @@ def delete_gnb(container_id_or_name: str) -> GnbOperationResponse:
                 message=f"Failed to stop container: {result.stderr}",
                 container=container_id_or_name
             )
-        
-        rm_cmd = [runtime, "rm", container_id_or_name]
+
+        rm_cmd = [container_runtime, "rm", container_id_or_name]
         result = subprocess.run(rm_cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
@@ -396,10 +464,26 @@ def delete_gnb(container_id_or_name: str) -> GnbOperationResponse:
             message=f"Container {container_id_or_name} successfully deleted",
             container=container_id_or_name
         )
-    except Exception as e:
+    except ValueError as e:
+        # Validation errors from validate_container_id() or validate_container_name()
         return GnbOperationResponse(
             status="error",
             message=str(e),
+            container=container_id_or_name
+        )
+    except Exception as e:
+        # Handle container operations and other errors
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            error_msg = f"Container {container_id_or_name} not found"
+        elif "permission" in error_msg.lower():
+            error_msg = f"Permission denied: {error_msg}"
+        elif "already stopped" in error_msg.lower():
+            error_msg = f"Container {container_id_or_name} is already stopped"
+        
+        return GnbOperationResponse(
+            status="error",
+            message=error_msg,
             container=container_id_or_name
         )
 
@@ -423,12 +507,12 @@ def get_gnb_logs(container_id_or_name: str, lines: int = 100) -> GnbOperationRes
             validate_container_name(container_id_or_name, "gnb")
         
         # Get container runtime
-        runtime = get_container_runtime()
-        
+        container_runtime = get_container_runtime()
+
         # Execute command to retrieve logs
-        cmd = [runtime, "logs", f"--tail={lines}", container_id_or_name]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
+        terminal_command = [container_runtime, "logs", f"--tail={lines}", container_id_or_name]
+        result = subprocess.run(terminal_command, capture_output=True, text=True)
+
         if result.returncode != 0:
             return GnbOperationResponse(
                 status="error",
@@ -607,13 +691,13 @@ def list_ues() -> UeListResponse:
         UeListResponse: List of UE containers
     """
     try:
-        runtime = get_container_runtime()
-        cmd = [
-            runtime, "ps", "-a", "--filter", "label=ueransim.type=ue", 
+        container_runtime = get_container_runtime()
+        terminal_command = [
+            container_runtime, "ps", "-a", "--filter", "label=ueransim.type=ue", 
             "--format", "{{.ID}}|{{.Names}}|{{.Status}}|{{.CreatedAt}}"
         ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        result = subprocess.run(terminal_command, capture_output=True, text=True)
         
         if result.returncode != 0:
             return UeListResponse(
@@ -831,6 +915,119 @@ def attach_ue_to_gnb(ue_container_id_or_name: str, gnb_container_id_or_name: str
             status="error",
             message=str(e),
             container=ue_container_id_or_name
+        )
+
+
+@mcp.tool()
+def edit_exist_container(container_id_or_name: str, 
+                        config_type: str = "gnb_search_list",
+                        config_value: str = "127.0.0.1") -> UeOperationResponse:
+    """Edit configuration of an existing container.
+    
+    Args:
+        container_id_or_name: Container ID or name to edit
+        config_type: Type of configuration to change (gnb_search_list, ngap_ip, gtp_ip)
+        config_value: New configuration value
+        
+    Returns:
+        UeOperationResponse: Operation status
+    """
+    try:
+        # Validate that container exists and is accessible
+        validate_existing_container(container_id_or_name)
+        
+        # Validate config value based on type
+        if config_type in ["gnb_search_list", "ngap_ip", "gtp_ip"]:
+            validate_ip(config_value)
+        
+        # Get container runtime
+        runtime = get_container_runtime()
+        
+        # Container already validated by validate_existing_container, no need to check again
+        
+        # Apply configuration based on type
+        if config_type == "gnb_search_list":
+            # Update UE configuration
+            config_cmd = [
+                runtime, "exec", container_id_or_name,
+                "sed", "-i", f"s/gnbSearchList: .*/gnbSearchList: {config_value}/",
+                "/etc/ueransim/open5gs-ue.yaml"
+            ]
+        elif config_type == "ngap_ip":
+            # Update gNB NGAP IP
+            config_cmd = [
+                runtime, "exec", container_id_or_name,
+                "sed", "-i", f"s/ngapIp: .*/ngapIp: {config_value}/",
+                "/etc/ueransim/open5gs-gnb.yaml"
+            ]
+        elif config_type == "gtp_ip":
+            # Update gNB GTP IP
+            config_cmd = [
+                runtime, "exec", container_id_or_name,
+                "sed", "-i", f"s/gtpIp: .*/gtpIp: {config_value}/",
+                "/etc/ueransim/open5gs-gnb.yaml"
+            ]
+        else:
+            return UeOperationResponse(
+                status="error",
+                message=f"Unsupported config type: {config_type}",
+                container=container_id_or_name
+            )
+        
+        # Execute configuration change
+        config_result = subprocess.run(config_cmd, capture_output=True, text=True)
+        
+        if config_result.returncode != 0:
+            return UeOperationResponse(
+                status="error",
+                message=f"Failed to update {config_type}: {config_result.stderr}",
+                container=container_id_or_name
+            )
+        
+        # Add success message to logs
+        log_cmd = [
+            runtime, "exec", container_id_or_name,
+            "sh", "-c", f"echo 'Configuration updated: {config_type}={config_value}' >> /var/log/ueransim.log"
+        ]
+        subprocess.run(log_cmd)
+        
+        # Echo success to demonstrate completion
+        success_cmd = [
+            runtime, "exec", container_id_or_name,
+            "sh", "-c", "echo 'success'"
+        ]
+        success_result = subprocess.run(success_cmd, capture_output=True, text=True)
+        
+        return UeOperationResponse(
+            status="success",
+            message=f"Container {container_id_or_name} configuration updated: {config_type}={config_value}",
+            container=container_id_or_name,
+            logs=success_result.stdout if success_result.returncode == 0 else None
+        )
+        
+    except ValueError as e:
+        # Validation errors from validate_existing_container() or validate_ip()
+        return UeOperationResponse(
+            status="error",
+            message=str(e),
+            container=container_id_or_name
+        )
+    except Exception as e:
+        # Handle container operations and configuration errors
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            error_msg = f"Container {container_id_or_name} not found or not accessible"
+        elif "permission" in error_msg.lower():
+            error_msg = f"Permission denied: {error_msg}"
+        elif "no such file" in error_msg.lower():
+            error_msg = "Configuration file not found in container"
+        elif "command not found" in error_msg.lower():
+            error_msg = "Container runtime (Docker/nerdctl) not found"
+        
+        return UeOperationResponse(
+            status="error",
+            message=error_msg,
+            container=container_id_or_name
         )
 
 
