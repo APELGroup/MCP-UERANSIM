@@ -48,7 +48,7 @@ COPY config/open5gs-ue.yaml /etc/ueransim/
 LABEL ueransim.type=ue
 
 # Default value για GNB_SEARCH_LIST
-ENV GNB_SEARCH_LIST="127.0.0.1"
+#ENV GNB_SEARCH_LIST="127.0.0.1"
 
 # Script for dynamic configuration
 COPY docker/ue-entrypoint.sh /usr/local/bin/
