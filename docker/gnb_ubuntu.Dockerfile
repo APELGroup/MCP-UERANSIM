@@ -56,6 +56,6 @@ ENV LINK_IP="127.0.0.1" \
 
 # Script for dynamic configuration
 COPY docker/gnb-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/gnb-entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/gnb-entrypoint.sh"]
+
+CMD ["tail", "-f", "/dev/null"]

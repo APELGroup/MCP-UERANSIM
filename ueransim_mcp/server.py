@@ -240,18 +240,12 @@ class UeOperationResponse(BaseModel):
 # ============================================================================
 
 @mcp.tool()
-def create_gnb(link_ip: str = "127.0.0.1", 
-               ngap_ip: str = "127.0.0.1", 
-               gtp_ip: str = "127.0.0.1", 
-               amf_address: str = "127.0.0.5", 
+def create_gnb(amf_address: str = "127.0.0.5", 
                amf_port: str = "38412", 
                container_name: Optional[str] = None) -> GnbCreateResponse:
     """Create a new gNB container.
     
     Args:
-        link_ip: Link interface IP address
-        ngap_ip: NGAP interface IP address
-        gtp_ip: GTP interface IP address
         amf_address: AMF IP address
         amf_port: AMF port
         container_name: Optional container name
@@ -260,10 +254,7 @@ def create_gnb(link_ip: str = "127.0.0.1",
         GnbCreateResponse: Information about the new container
     """
     try:
-        # Validate IP parameters
-        validate_ip(link_ip)
-        validate_ip(ngap_ip)
-        validate_ip(gtp_ip)
+        # Validate AMF IP parameter
         validate_ip(amf_address)
         
         # Get container runtime (docker or nerdctl)
@@ -280,17 +271,10 @@ def create_gnb(link_ip: str = "127.0.0.1",
             container_name = f"gnb-{generate_random_suffix()}"
             terminal_command.extend(["--name", container_name])
 
-        # Add environment variables
-        terminal_command.extend([
-            "-e", f"LINK_IP={link_ip}",
-            "-e", f"NGAP_IP={ngap_ip}",
-            "-e", f"GTP_IP={gtp_ip}",
-            "-e", f"AMF_ADDRESS={amf_address}",
-            "-e", f"AMF_PORT={amf_port}",
-            "ueransim-gnb:latest"  # Docker image name
-        ])
+        # Add the Docker image name
+        terminal_command.append("ueransim-gnb:latest")
         
-        # Execute command
+        # Execute command to create container
         result = subprocess.run(terminal_command, capture_output=True, text=True)
 
         if result.returncode != 0:
@@ -299,9 +283,9 @@ def create_gnb(link_ip: str = "127.0.0.1",
                 container_id="",
                 container_name="",
                 configuration=GnbConfiguration(
-                    link_ip=link_ip,
-                    ngap_ip=ngap_ip,
-                    gtp_ip=gtp_ip,
+                    link_ip="",
+                    ngap_ip="",
+                    gtp_ip="",
                     amf_address=amf_address,
                     amf_port=amf_port
                 ),
@@ -310,14 +294,154 @@ def create_gnb(link_ip: str = "127.0.0.1",
         
         container_id = result.stdout.strip()
         
+        # Step 1: Get container IP using docker inspect
+        inspect_command = [
+            container_runtime, "inspect", "-f", 
+            "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", 
+            container_id
+        ]
+        inspect_result = subprocess.run(inspect_command, capture_output=True, text=True)
+        
+        if inspect_result.returncode != 0:
+            return GnbCreateResponse(
+                status="error",
+                container_id=container_id,
+                container_name=container_name,
+                configuration=GnbConfiguration(
+                    link_ip="",
+                    ngap_ip="",
+                    gtp_ip="",
+                    amf_address=amf_address,
+                    amf_port=amf_port
+                ),
+                message=f"Failed to get container IP: {inspect_result.stderr}"
+            )
+        
+        container_ip = inspect_result.stdout.strip()
+        
+        # Step 2: Update configuration file with container IP and AMF settings
+        # Update linkIp with container IP
+        link_cmd = [
+            container_runtime, "exec", container_id,
+            "sed", "-i", f"s/linkIp: .*/linkIp: {container_ip}/",
+            "/etc/ueransim/open5gs-gnb.yaml"
+        ]
+        link_result = subprocess.run(link_cmd, capture_output=True, text=True)
+        
+        if link_result.returncode != 0:
+            return GnbCreateResponse(
+                status="error",
+                container_id=container_id,
+                container_name=container_name,
+                configuration=GnbConfiguration(
+                    link_ip=container_ip,
+                    ngap_ip=container_ip,
+                    gtp_ip=container_ip,
+                    amf_address=amf_address,
+                    amf_port=amf_port
+                ),
+                message=f"Failed to update linkIp: {link_result.stderr}"
+            )
+        
+        # Update ngapIp with container IP
+        ngap_cmd = [
+            container_runtime, "exec", container_id,
+            "sed", "-i", f"s/ngapIp: .*/ngapIp: {container_ip}/",
+            "/etc/ueransim/open5gs-gnb.yaml"
+        ]
+        ngap_result = subprocess.run(ngap_cmd, capture_output=True, text=True)
+        
+        if ngap_result.returncode != 0:
+            return GnbCreateResponse(
+                status="error",
+                container_id=container_id,
+                container_name=container_name,
+                configuration=GnbConfiguration(
+                    link_ip=container_ip,
+                    ngap_ip=container_ip,
+                    gtp_ip=container_ip,
+                    amf_address=amf_address,
+                    amf_port=amf_port
+                ),
+                message=f"Failed to update ngapIp: {ngap_result.stderr}"
+            )
+        
+        # Update gtpIp with container IP
+        gtp_cmd = [
+            container_runtime, "exec", container_id,
+            "sed", "-i", f"s/gtpIp: .*/gtpIp: {container_ip}/",
+            "/etc/ueransim/open5gs-gnb.yaml"
+        ]
+        gtp_result = subprocess.run(gtp_cmd, capture_output=True, text=True)
+        
+        if gtp_result.returncode != 0:
+            return GnbCreateResponse(
+                status="error",
+                container_id=container_id,
+                container_name=container_name,
+                configuration=GnbConfiguration(
+                    link_ip=container_ip,
+                    ngap_ip=container_ip,
+                    gtp_ip=container_ip,
+                    amf_address=amf_address,
+                    amf_port=amf_port
+                ),
+                message=f"Failed to update gtpIp: {gtp_result.stderr}"
+            )
+        
+        # Update AMF address
+        amf_cmd = [
+            container_runtime, "exec", container_id,
+            "sed", "-i", f"s/amfConfigs:.*address: .*/amfConfigs:\\n  - address: {amf_address}/",
+            "/etc/ueransim/open5gs-gnb.yaml"
+        ]
+        amf_result = subprocess.run(amf_cmd, capture_output=True, text=True)
+        
+        if amf_result.returncode != 0:
+            return GnbCreateResponse(
+                status="error",
+                container_id=container_id,
+                container_name=container_name,
+                configuration=GnbConfiguration(
+                    link_ip=container_ip,
+                    ngap_ip=container_ip,
+                    gtp_ip=container_ip,
+                    amf_address=amf_address,
+                    amf_port=amf_port
+                ),
+                message=f"Failed to update AMF address: {amf_result.stderr}"
+            )
+        
+        # Step 3: Execute nr-gnb with the configuration file
+        exec_command = [
+            container_runtime, "exec", "-d", container_id,
+            "/usr/local/bin/nr-gnb", "-c", "/etc/ueransim/open5gs-gnb.yaml"
+        ]
+        exec_result = subprocess.run(exec_command, capture_output=True, text=True)
+        
+        if exec_result.returncode != 0:
+            return GnbCreateResponse(
+                status="error",
+                container_id=container_id,
+                container_name=container_name,
+                configuration=GnbConfiguration(
+                    link_ip=container_ip,
+                    ngap_ip=container_ip,
+                    gtp_ip=container_ip,
+                    amf_address=amf_address,
+                    amf_port=amf_port
+                ),
+                message=f"Failed to execute nr-gnb: {exec_result.stderr}"
+            )
+        
         return GnbCreateResponse(
             status="success",
             container_id=container_id,
-            container_name=container_name or container_id[:12],
+            container_name=container_name,
             configuration=GnbConfiguration(
-                link_ip=link_ip,
-                ngap_ip=ngap_ip,
-                gtp_ip=gtp_ip,
+                link_ip=container_ip,
+                ngap_ip=container_ip,
+                gtp_ip=container_ip,
                 amf_address=amf_address,
                 amf_port=amf_port
             )
@@ -329,9 +453,9 @@ def create_gnb(link_ip: str = "127.0.0.1",
             container_id="",
             container_name="",
             configuration=GnbConfiguration(
-                link_ip=link_ip,
-                ngap_ip=ngap_ip,
-                gtp_ip=gtp_ip,
+                link_ip="",
+                ngap_ip="",
+                gtp_ip="",
                 amf_address=amf_address,
                 amf_port=amf_port
             ),
@@ -350,9 +474,9 @@ def create_gnb(link_ip: str = "127.0.0.1",
             container_id="",
             container_name="",
             configuration=GnbConfiguration(
-                link_ip=link_ip,
-                ngap_ip=ngap_ip,
-                gtp_ip=gtp_ip,
+                link_ip="",
+                ngap_ip="",
+                gtp_ip="",
                 amf_address=amf_address,
                 amf_port=amf_port
             ),

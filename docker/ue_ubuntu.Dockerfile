@@ -52,6 +52,6 @@ ENV GNB_SEARCH_LIST="127.0.0.1"
 
 # Script for dynamic configuration
 COPY docker/ue-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/ue-entrypoint.sh
+#RUN chmod +x /usr/local/bin/ue-entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/ue-entrypoint.sh"]
+CMD ["tail", "-f", "/dev/null"]
