@@ -739,6 +739,84 @@ def attach_gnb_to_core(container_id_or_name: str, ngap_ip: str, gtp_ip: str) -> 
 
 
 # ============================================================================
+# COMMON TOOLS
+# ============================================================================
+
+@mcp.tool()
+def inspect_container_ip(container_id_or_name: str) -> GnbOperationResponse:
+    """Inspect container IP address using docker inspect command.
+    
+    Args:
+        container_id_or_name: Container ID or name to inspect
+        
+    Returns:
+        GnbOperationResponse: Container IP information
+    """
+    try:
+        # Validate that container exists and is accessible
+        validate_existing_container(container_id_or_name)
+        
+        # Get container runtime
+        runtime = get_container_runtime()
+        
+        # Use docker inspect to get container IP
+        inspect_cmd = [
+            runtime, "inspect", "-f", 
+            "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", 
+            container_id_or_name
+        ]
+        
+        result = subprocess.run(inspect_cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            return GnbOperationResponse(
+                status="error",
+                message=f"Failed to inspect container: {result.stderr}",
+                container=container_id_or_name
+            )
+        
+        container_ip = result.stdout.strip()
+        
+        # Check if IP was found
+        if not container_ip:
+            return GnbOperationResponse(
+                status="error",
+                message=f"No IP address found for container {container_id_or_name}",
+                container=container_id_or_name
+            )
+        
+        return GnbOperationResponse(
+            status="success",
+            message=f"Container {container_id_or_name} IP address: {container_ip}",
+            container=container_id_or_name,
+            logs=container_ip
+        )
+        
+    except ValueError as e:
+        # Validation errors from validate_existing_container()
+        return GnbOperationResponse(
+            status="error",
+            message=str(e),
+            container=container_id_or_name
+        )
+    except Exception as e:
+        # Handle container operations and other errors
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            error_msg = f"Container {container_id_or_name} not found or not accessible"
+        elif "permission" in error_msg.lower():
+            error_msg = f"Permission denied: {error_msg}"
+        elif "command not found" in error_msg.lower():
+            error_msg = "Container runtime (Docker/nerdctl) not found"
+        
+        return GnbOperationResponse(
+            status="error",
+            message=error_msg,
+            container=container_id_or_name
+        )
+
+
+# ============================================================================
 # UE TOOLS
 # ============================================================================
 
