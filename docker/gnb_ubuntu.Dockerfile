@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
+    nano \
     make \
     gcc \
     g++ \
@@ -54,8 +55,17 @@ ENV LINK_IP="127.0.0.1" \
     AMF_ADDRESS="127.0.0.5" \
     AMF_PORT="38412"
 
-# Script for dynamic configuration
+# Script for dynamic configuration (available for manual use)
 COPY docker/gnb-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/gnb-entrypoint.sh
 
+# Create a script that waits for signal to start UERANSIM
+RUN echo '#!/bin/bash' > /usr/local/bin/wait-and-run.sh && \
+    echo 'echo "Container ready. Waiting for UERANSIM start signal..."' >> /usr/local/bin/wait-and-run.sh && \
+    echo 'while [ ! -f /tmp/start_gnb ]; do sleep 1; done' >> /usr/local/bin/wait-and-run.sh && \
+    echo 'echo "Starting UERANSIM gNB..."' >> /usr/local/bin/wait-and-run.sh && \
+    echo 'exec nr-gnb -c /etc/ueransim/open5gs-gnb.yaml' >> /usr/local/bin/wait-and-run.sh && \
+    chmod +x /usr/local/bin/wait-and-run.sh
 
-CMD ["tail", "-f", "/dev/null"]
+# Use the wait script as main process
+CMD ["/usr/local/bin/wait-and-run.sh"]

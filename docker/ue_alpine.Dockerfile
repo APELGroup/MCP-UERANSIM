@@ -27,7 +27,10 @@ RUN apk add --no-cache \
 
 # Copy executables and configuration files
 COPY --from=builder /opt/UERANSIM/build/nr-ue /usr/local/bin/
-COPY --from=builder /opt/UERANSIM/config/open5gs-ue.yaml /etc/ueransim/
+RUN mkdir -p /etc/ueransim
+
+# Copy configuration file
+COPY config/open5gs-ue.yaml /etc/ueransim/
 
 # Label for container type identification
 LABEL ueransim.type=ue
@@ -36,7 +39,8 @@ LABEL ueransim.type=ue
 ENV GNB_SEARCH_LIST="127.0.0.1"
 
 # Script for dynamic configuration
-COPY ue-entrypoint.sh /usr/local/bin/
+COPY docker/ue-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/ue-entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/ue-entrypoint.sh"]
+# Keep container running without starting UERANSIM automatically
+CMD ["tail", "-f", "/dev/null"]

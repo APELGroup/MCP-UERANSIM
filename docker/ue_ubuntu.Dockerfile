@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install build dependencies without snap
 RUN apt-get update && apt-get install -y \
+    nano \
     make \
     gcc \
     g++ \
@@ -48,10 +49,19 @@ COPY config/open5gs-ue.yaml /etc/ueransim/
 LABEL ueransim.type=ue
 
 # Default value για GNB_SEARCH_LIST
-#ENV GNB_SEARCH_LIST="127.0.0.1"
+ENV GNB_SEARCH_LIST="127.0.0.1"
 
-# Script for dynamic configuration
+# Script for dynamic configuration (available for manual use)
 COPY docker/ue-entrypoint.sh /usr/local/bin/
-#RUN chmod +x /usr/local/bin/ue-entrypoint.sh
+RUN chmod +x /usr/local/bin/ue-entrypoint.sh
 
-CMD ["tail", "-f", "/dev/null"]
+# Create a script that waits for signal to start UERANSIM
+RUN echo '#!/bin/bash' > /usr/local/bin/wait-and-run.sh && \
+    echo 'echo "Container ready. Waiting for UERANSIM start signal..."' >> /usr/local/bin/wait-and-run.sh && \
+    echo 'while [ ! -f /tmp/start_ue ]; do sleep 1; done' >> /usr/local/bin/wait-and-run.sh && \
+    echo 'echo "Starting UERANSIM UE..."' >> /usr/local/bin/wait-and-run.sh && \
+    echo 'exec nr-ue -c /etc/ueransim/open5gs-ue.yaml' >> /usr/local/bin/wait-and-run.sh && \
+    chmod +x /usr/local/bin/wait-and-run.sh
+
+# Use the wait script as main process
+CMD ["/usr/local/bin/wait-and-run.sh"]

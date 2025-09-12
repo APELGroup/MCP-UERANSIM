@@ -5,6 +5,8 @@ import sys
 import re
 import random
 import string
+import time
+import os
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from mcp.server.fastmcp import FastMCP
@@ -18,21 +20,27 @@ print("UERANSIM MCP Server initialized", file=sys.stderr)
 # ============================================================================
 
 def get_container_runtime():
-    """Get the preferred container runtime (docker or nerdctl).
+    """Get Docker as the container runtime.
     
     Returns:
-        str: "docker" or "nerdctl" based on availability
+        str: "docker"
     """
-    # Try nerdctl first, fallback to docker
-    try:
-        result = subprocess.run(["nerdctl", "version"], capture_output=True, text=True)
-        if result.returncode == 0:
-            return "nerdctl"
-    except FileNotFoundError:
-        pass
+    import os
     
-    # Default to docker
-    return "docker"
+    # Try docker
+    try:
+        result = subprocess.run(["docker", "version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            return "docker"
+        else:
+            print(f"docker error: {result.stderr}", file=sys.stderr)
+            raise RuntimeError("Docker is not available")
+    except FileNotFoundError:
+        print("docker not found", file=sys.stderr)
+        raise RuntimeError("Docker is not installed or not in PATH")
+    
+    # If docker doesn't work, raise error
+    raise RuntimeError("Docker container runtime is required")
 
 def generate_random_suffix(length: int = 4) -> str:
     """Generate a random alphanumeric suffix for container names.
@@ -44,6 +52,37 @@ def generate_random_suffix(length: int = 4) -> str:
         Random alphanumeric string
     """
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+def run_container_command(command: List[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run a Docker command with proper environment setup.
+    
+    Args:
+        command: List of command parts
+        **kwargs: Additional arguments to pass to subprocess.run
+        
+    Returns:
+        CompletedProcess: Result of the command execution
+    """
+    import os
+    
+    # Set up basic environment
+    env = os.environ.copy()
+    
+    # Add PATH from current environment to ensure docker is found
+    if 'PATH' not in env:
+        env['PATH'] = '/usr/local/bin:/usr/bin:/bin'
+    else:
+        # Ensure common bin directories are in PATH
+        path_dirs = env['PATH'].split(':')
+        for directory in ['/usr/local/bin', '/usr/bin', '/bin', '/home/dkap/.local/bin']:
+            if directory not in path_dirs:
+                env['PATH'] = f"{directory}:{env['PATH']}"
+    
+    # Add env to kwargs if not already specified
+    if 'env' not in kwargs:
+        kwargs['env'] = env
+    
+    return subprocess.run(command, **kwargs)
 
 # ============================================================================
 # VALIDATION FUNCTIONS
@@ -142,11 +181,11 @@ def validate_existing_container(container_id_or_name: str) -> bool:
             if not re.match(r'^[a-zA-Z0-9_-]+$', container_id_or_name):
                 raise ValueError(f"Invalid container name format: {container_id_or_name}")
         
-        # Check if container exists using docker/nerdctl inspect
+        # Check if container exists using docker inspect
         container_runtime = get_container_runtime()
         inspect_cmd = [container_runtime, "inspect", container_id_or_name]
         
-        result = subprocess.run(inspect_cmd, capture_output=True, text=True)
+        result = run_container_command(inspect_cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
             raise ValueError(f"Container {container_id_or_name} not found or not accessible")
@@ -156,7 +195,7 @@ def validate_existing_container(container_id_or_name: str) -> bool:
     except subprocess.SubprocessError as e:
         raise ValueError(f"Failed to validate container {container_id_or_name}: {str(e)}")
     except FileNotFoundError:
-        raise ValueError("Container runtime (Docker/nerdctl) not found")
+        raise ValueError("Container runtime (Docker) not found")
 
 # ============================================================================
 # PYDANTIC MODELS FOR STRUCTURED OUTPUT
@@ -257,11 +296,14 @@ def create_gnb(amf_address: str = "127.0.0.5",
         # Validate AMF IP parameter
         validate_ip(amf_address)
         
-        # Get container runtime (docker or nerdctl)
+        # Get container runtime (docker)
         container_runtime = get_container_runtime()
         
         # Create container command
         terminal_command = [container_runtime, "run", "-d"]
+
+        # Add network configuration to avoid port conflicts
+        # terminal_command.extend(["--network", "host"])
 
         # Add name if specified, otherwise generate one
         if container_name:
@@ -275,7 +317,7 @@ def create_gnb(amf_address: str = "127.0.0.5",
         terminal_command.append("ueransim-gnb:latest")
         
         # Execute command to create container
-        result = subprocess.run(terminal_command, capture_output=True, text=True)
+        result = run_container_command(terminal_command, capture_output=True, text=True)
 
         if result.returncode != 0:
             return GnbCreateResponse(
@@ -300,7 +342,7 @@ def create_gnb(amf_address: str = "127.0.0.5",
             "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", 
             container_id
         ]
-        inspect_result = subprocess.run(inspect_command, capture_output=True, text=True)
+        inspect_result = run_container_command(inspect_command, capture_output=True, text=True)
         
         if inspect_result.returncode != 0:
             return GnbCreateResponse(
@@ -326,7 +368,7 @@ def create_gnb(amf_address: str = "127.0.0.5",
             "sed", "-i", f"s/linkIp: .*/linkIp: {container_ip}/",
             "/etc/ueransim/open5gs-gnb.yaml"
         ]
-        link_result = subprocess.run(link_cmd, capture_output=True, text=True)
+        link_result = run_container_command(link_cmd, capture_output=True, text=True)
         
         if link_result.returncode != 0:
             return GnbCreateResponse(
@@ -349,7 +391,7 @@ def create_gnb(amf_address: str = "127.0.0.5",
             "sed", "-i", f"s/ngapIp: .*/ngapIp: {container_ip}/",
             "/etc/ueransim/open5gs-gnb.yaml"
         ]
-        ngap_result = subprocess.run(ngap_cmd, capture_output=True, text=True)
+        ngap_result = run_container_command(ngap_cmd, capture_output=True, text=True)
         
         if ngap_result.returncode != 0:
             return GnbCreateResponse(
@@ -372,7 +414,7 @@ def create_gnb(amf_address: str = "127.0.0.5",
             "sed", "-i", f"s/gtpIp: .*/gtpIp: {container_ip}/",
             "/etc/ueransim/open5gs-gnb.yaml"
         ]
-        gtp_result = subprocess.run(gtp_cmd, capture_output=True, text=True)
+        gtp_result = run_container_command(gtp_cmd, capture_output=True, text=True)
         
         if gtp_result.returncode != 0:
             return GnbCreateResponse(
@@ -395,7 +437,7 @@ def create_gnb(amf_address: str = "127.0.0.5",
             "sed", "-i", f"s/amfConfigs:.*address: .*/amfConfigs:\\n  - address: {amf_address}/",
             "/etc/ueransim/open5gs-gnb.yaml"
         ]
-        amf_result = subprocess.run(amf_cmd, capture_output=True, text=True)
+        amf_result = run_container_command(amf_cmd, capture_output=True, text=True)
         
         if amf_result.returncode != 0:
             return GnbCreateResponse(
@@ -410,28 +452,6 @@ def create_gnb(amf_address: str = "127.0.0.5",
                     amf_port=amf_port
                 ),
                 message=f"Failed to update AMF address: {amf_result.stderr}"
-            )
-        
-        # Step 3: Execute nr-gnb with the configuration file
-        exec_command = [
-            container_runtime, "exec", "-d", container_id,
-            "/usr/local/bin/nr-gnb", "-c", "/etc/ueransim/open5gs-gnb.yaml"
-        ]
-        exec_result = subprocess.run(exec_command, capture_output=True, text=True)
-        
-        if exec_result.returncode != 0:
-            return GnbCreateResponse(
-                status="error",
-                container_id=container_id,
-                container_name=container_name,
-                configuration=GnbConfiguration(
-                    link_ip=container_ip,
-                    ngap_ip=container_ip,
-                    gtp_ip=container_ip,
-                    amf_address=amf_address,
-                    amf_port=amf_port
-                ),
-                message=f"Failed to execute nr-gnb: {exec_result.stderr}"
             )
         
         return GnbCreateResponse(
@@ -465,7 +485,7 @@ def create_gnb(amf_address: str = "127.0.0.5",
         # Handle container creation failures and other unexpected errors
         error_msg = str(e)
         if "not found" in error_msg.lower():
-            error_msg = "Container runtime (Docker/nerdctl) not found or not accessible"
+            error_msg = "Container runtime (Docker) not found or not accessible"
         elif "permission" in error_msg.lower():
             error_msg = f"Permission denied: {error_msg}"
         
@@ -494,11 +514,11 @@ def list_gnbs() -> GnbListResponse:
     try:
         container_runtime = get_container_runtime()
         terminal_command = [
-            container_runtime, "ps", "-a", "--filter", "label=ueransim.type=gnb", 
+            container_runtime, "ps", "-a", "--filter", "name=gnb-", 
             "--format", "{{.ID}}|{{.Names}}|{{.Status}}|{{.CreatedAt}}"
         ]
 
-        result = subprocess.run(terminal_command, capture_output=True, text=True)
+        result = run_container_command(terminal_command, capture_output=True, text=True)
 
         if result.returncode != 0:
             return GnbListResponse(
@@ -528,7 +548,7 @@ def list_gnbs() -> GnbListResponse:
         # Handle all errors with smart error message detection
         error_msg = str(e)
         if "not found" in error_msg.lower() or "command not found" in error_msg.lower():
-            error_msg = "Container runtime (Docker/nerdctl) not found"
+            error_msg = "Container runtime (Docker) not found"
         elif "permission" in error_msg.lower():
             error_msg = f"Permission denied: {error_msg}"
         elif "invalid" in error_msg.lower() or "format" in error_msg.lower():
@@ -564,7 +584,7 @@ def delete_gnb(container_id_or_name: str) -> GnbOperationResponse:
 
         # Stop and remove container
         stop_cmd = [container_runtime, "stop", container_id_or_name]
-        result = subprocess.run(stop_cmd, capture_output=True, text=True)
+        result = run_container_command(stop_cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
             return GnbOperationResponse(
@@ -574,7 +594,7 @@ def delete_gnb(container_id_or_name: str) -> GnbOperationResponse:
             )
 
         rm_cmd = [container_runtime, "rm", container_id_or_name]
-        result = subprocess.run(rm_cmd, capture_output=True, text=True)
+        result = run_container_command(rm_cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
             return GnbOperationResponse(
@@ -635,7 +655,7 @@ def get_gnb_logs(container_id_or_name: str, lines: int = 100) -> GnbOperationRes
 
         # Execute command to retrieve logs
         terminal_command = [container_runtime, "logs", f"--tail={lines}", container_id_or_name]
-        result = subprocess.run(terminal_command, capture_output=True, text=True)
+        result = run_container_command(terminal_command, capture_output=True, text=True)
 
         if result.returncode != 0:
             return GnbOperationResponse(
@@ -659,21 +679,19 @@ def get_gnb_logs(container_id_or_name: str, lines: int = 100) -> GnbOperationRes
 
 
 @mcp.tool()
-def attach_gnb_to_core(container_id_or_name: str, ngap_ip: str, gtp_ip: str) -> GnbOperationResponse:
+def attach_gnb_to_core(container_id_or_name: str, amf_address: str = "192.168.188.205") -> GnbOperationResponse:
     """Attach a gNB container to the network core.
     
     Args:
         container_id_or_name: gNB container ID or name
-        ngap_ip: New NGAP IP address
-        gtp_ip: New GTP IP address
+        amf_address: AMF IP address (default: 192.168.188.205)
         
     Returns:
         GnbOperationResponse: Connection status
     """
     try:
         # Validate parameters
-        validate_ip(ngap_ip)
-        validate_ip(gtp_ip)
+        validate_ip(amf_address)
         
         # Check if it's ID or name
         if container_id_or_name.isdigit() and len(container_id_or_name) == 12 or len(container_id_or_name) == 64:
@@ -684,51 +702,49 @@ def attach_gnb_to_core(container_id_or_name: str, ngap_ip: str, gtp_ip: str) -> 
         # Get container runtime
         container_runtime = get_container_runtime()
         
-        # Command to change NGAP IP
-        ngap_cmd = [
+        # Command to change AMF address in amfConfigs section
+        amf_cmd = [
             container_runtime, "exec", container_id_or_name, 
-            "sed", "-i", f"s/ngapIp: .*/ngapIp: {ngap_ip}/", 
+            "sed", "-i", f"s/- address: .*/- address: {amf_address}/", 
             "/etc/ueransim/open5gs-gnb.yaml"
         ]
-        result_ngap = subprocess.run(ngap_cmd, capture_output=True, text=True)
+        result_amf = run_container_command(amf_cmd, capture_output=True, text=True)
         
-        if result_ngap.returncode != 0:
+        if result_amf.returncode != 0:
             return GnbOperationResponse(
                 status="error",
-                message=f"Failed to update NGAP IP: {result_ngap.stderr}",
+                message=f"Failed to update AMF address: {result_amf.stderr}",
                 container=container_id_or_name
             )
         
-        # Command to change GTP IP
-        gtp_cmd = [
-            container_runtime, "exec", container_id_or_name, 
-            "sed", "-i", f"s/gtpIp: .*/gtpIp: {gtp_ip}/", 
-            "/etc/ueransim/open5gs-gnb.yaml"
+        # Start nr-gnb process with the updated configuration using nohup for background execution with logs
+        gnb_exec_cmd = [
+            container_runtime, "exec", "-d", container_id_or_name, "sh", "-c",
+            "nohup /usr/local/bin/nr-gnb -c /etc/ueransim/open5gs-gnb.yaml > /proc/1/fd/1 2>&1 &"
         ]
-        result_gtp = subprocess.run(gtp_cmd, capture_output=True, text=True)
+        gnb_exec_result = run_container_command(gnb_exec_cmd, capture_output=True, text=True)
         
-        if result_gtp.returncode != 0:
+        if gnb_exec_result.returncode != 0:
             return GnbOperationResponse(
                 status="error",
-                message=f"Failed to update GTP IP: {result_gtp.stderr}",
+                message=f"Failed to start nr-gnb process: {gnb_exec_result.stderr}",
                 container=container_id_or_name
             )
         
-        # Restart process to apply changes
-        restart_cmd = [container_runtime, "restart", container_id_or_name]
-        result_restart = subprocess.run(restart_cmd, capture_output=True, text=True)
+        # Wait a moment for process to start
+        time.sleep(2)
         
-        if result_restart.returncode != 0:
-            return GnbOperationResponse(
-                status="error",
-                message=f"Failed to restart container: {result_restart.stderr}",
-                container=container_id_or_name
-            )
+        # Check if process is running
+        gnb_status_cmd = [container_runtime, "exec", container_id_or_name, "sh", "-c", "pgrep -f nr-gnb && echo 'gNB process is running' || echo 'gNB process not found'"]
+        gnb_status_result = run_container_command(gnb_status_cmd, capture_output=True, text=True)
+        
+        process_status = "Process started successfully" if gnb_status_result.returncode == 0 and "process is running" in gnb_status_result.stdout else "Process may not be running"
         
         return GnbOperationResponse(
             status="success",
-            message=f"Container {container_id_or_name} successfully connected to core with NGAP IP {ngap_ip} and GTP IP {gtp_ip}",
-            container=container_id_or_name
+            message=f"Container {container_id_or_name} successfully connected to core with AMF address {amf_address}. nr-gnb process started. {process_status}",
+            container=container_id_or_name,
+            logs=gnb_status_result.stdout if gnb_status_result.returncode == 0 else None
         )
     except Exception as e:
         return GnbOperationResponse(
@@ -766,7 +782,7 @@ def inspect_container_ip(container_id_or_name: str) -> GnbOperationResponse:
             container_id_or_name
         ]
         
-        result = subprocess.run(inspect_cmd, capture_output=True, text=True)
+        result = run_container_command(inspect_cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
             return GnbOperationResponse(
@@ -807,7 +823,7 @@ def inspect_container_ip(container_id_or_name: str) -> GnbOperationResponse:
         elif "permission" in error_msg.lower():
             error_msg = f"Permission denied: {error_msg}"
         elif "command not found" in error_msg.lower():
-            error_msg = "Container runtime (Docker/nerdctl) not found"
+            error_msg = "Container runtime (Docker) not found"
         
         return GnbOperationResponse(
             status="error",
@@ -825,20 +841,38 @@ def create_ue(gnb_search_list: str = "127.0.0.1", container_name: Optional[str] 
     """Create a new UE container.
     
     Args:
-        gnb_search_list: gNB search list IP address
+        gnb_search_list: gNB search list IP address (or "auto" to use first available gNB)
         container_name: Optional container name
     
     Returns:
         UeCreateResponse: Information about the new container
     """
     try:
+        # If gnb_search_list is "auto", find the first available gNB container
+        if gnb_search_list == "auto":
+            # Get list of gNB containers
+            gnb_list = list_gnbs()
+            if gnb_list.status == "success" and gnb_list.count > 0:
+                # Get IP of the first gNB container
+                first_gnb = gnb_list.containers[0]
+                ip_result = inspect_container_ip(first_gnb.name)
+                if ip_result.status == "success":
+                    gnb_search_list = ip_result.logs
+                    print(f"Auto-detected gNB IP: {gnb_search_list}", file=sys.stderr)
+                else:
+                    gnb_search_list = "127.0.0.1"  # fallback
+                    print(f"Failed to get gNB IP, using fallback: {gnb_search_list}", file=sys.stderr)
+            else:
+                gnb_search_list = "127.0.0.1"  # fallback
+                print(f"No gNB containers found, using fallback: {gnb_search_list}", file=sys.stderr)
+        
         # Validate parameters
         validate_ip(gnb_search_list)
         
-        # Get container runtime (docker or nerdctl)
+        # Get container runtime (docker)
         container_runtime = get_container_runtime()
         
-        # Create container command
+        # Create container command (basic setup first)
         terminal_command = [container_runtime, "run", "-d"]
         
         # Add name if specified, otherwise generate one
@@ -848,15 +882,16 @@ def create_ue(gnb_search_list: str = "127.0.0.1", container_name: Optional[str] 
         else:
             container_name = f"ue-{generate_random_suffix()}"
             terminal_command.extend(["--name", container_name])
-            
-        # Add environment variables
+        
+        # Add basic capabilities
         terminal_command.extend([
-            "-e", f"GNB_SEARCH_LIST={gnb_search_list}",
+            "--cap-add=NET_ADMIN",
+            "--network", "host",
             "ueransim-ue:latest"  # Docker image name
         ])
         
-        # Execute command
-        result = subprocess.run(terminal_command, capture_output=True, text=True)
+        # Execute command to create container
+        result = run_container_command(terminal_command, capture_output=True, text=True)
         
         if result.returncode != 0:
             return UeCreateResponse(
@@ -869,6 +904,88 @@ def create_ue(gnb_search_list: str = "127.0.0.1", container_name: Optional[str] 
         
         container_id = result.stdout.strip()
         
+        # Check if this is an Alpine-based container and set up accordingly
+        check_os_cmd = [container_runtime, "exec", container_id, "cat", "/etc/os-release"]
+        os_result = run_container_command(check_os_cmd, capture_output=True, text=True)
+        
+        is_alpine = False
+        if os_result.returncode == 0 and "alpine" in os_result.stdout.lower():
+            is_alpine = True
+            # Alpine Linux detected - set up iproute2 and rt_tables
+            print(f"Alpine Linux detected in container {container_id}, setting up iproute2...", file=sys.stderr)
+            
+            # Create iproute2 directory
+            mkdir_cmd = [container_runtime, "exec", container_id, "mkdir", "-p", "/etc/iproute2"]
+            mkdir_result = run_container_command(mkdir_cmd, capture_output=True, text=True)
+            
+            if mkdir_result.returncode == 0:
+                # Create rt_tables file
+                rt_tables_cmd = [
+                    container_runtime, "exec", container_id, "sh", "-c",
+                    'echo "# Reserved values" > /etc/iproute2/rt_tables && ' +
+                    'echo "255	local" >> /etc/iproute2/rt_tables && ' +
+                    'echo "254	main" >> /etc/iproute2/rt_tables && ' +
+                    'echo "253	default" >> /etc/iproute2/rt_tables && ' +
+                    'echo "0	unspec" >> /etc/iproute2/rt_tables'
+                ]
+                rt_result = run_container_command(rt_tables_cmd, capture_output=True, text=True)
+                
+                if rt_result.returncode != 0:
+                    print(f"Warning: Failed to create rt_tables file: {rt_result.stderr}", file=sys.stderr)
+            else:
+                print(f"Warning: Failed to create iproute2 directory: {mkdir_result.stderr}", file=sys.stderr)
+        else:
+            # Ubuntu or other Linux - need to recreate container with TUN device
+            print(f"Ubuntu/Linux detected in container {container_id}, recreating with TUN device...", file=sys.stderr)
+            
+            # Stop and remove the current container
+            stop_cmd = [container_runtime, "stop", container_id]
+            run_container_command(stop_cmd, capture_output=True, text=True)
+            
+            rm_cmd = [container_runtime, "rm", container_id]
+            run_container_command(rm_cmd, capture_output=True, text=True)
+            
+            # Recreate container with TUN device for Ubuntu
+            terminal_command = [container_runtime, "run", "-d"]
+            terminal_command.extend(["--name", container_name])
+            terminal_command.extend([
+                "--cap-add=NET_ADMIN",
+                "--device", "/dev/net/tun",
+                "--network", "host",
+                "ueransim-ue:latest"
+            ])
+            
+            result = run_container_command(terminal_command, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                return UeCreateResponse(
+                    status="error",
+                    container_id="",
+                    container_name="",
+                    configuration=UeConfiguration(gnb_search_list=gnb_search_list),
+                    message=f"Failed to recreate container with TUN device: {result.stderr}"
+                )
+            
+            container_id = result.stdout.strip()
+        
+        # Update the gnbSearchList in the container's configuration file
+        # Note: gnbSearchList is in YAML array format, so we need to update the IP address in the array
+        update_cmd = [
+            container_runtime, "exec", container_id,
+            "sed", "-i", f"s/- 127\\.0\\.0\\.1/- {gnb_search_list}/",
+            "/etc/ueransim/open5gs-ue.yaml"
+        ]
+        update_result = run_container_command(update_cmd, capture_output=True, text=True)
+        
+        if update_result.returncode != 0:
+            return UeCreateResponse(
+                status="error",
+                container_id=container_id,
+                container_name=container_name,
+                configuration=UeConfiguration(gnb_search_list=gnb_search_list),
+                message=f"Container created but failed to update gnbSearchList: {update_result.stderr}"
+            )
+        
         return UeCreateResponse(
             status="success",
             container_id=container_id,
@@ -880,7 +997,7 @@ def create_ue(gnb_search_list: str = "127.0.0.1", container_name: Optional[str] 
             status="error",
             container_id="",
             container_name="",
-            configuration=UeConfiguration(gnb_search_list=gnb_search_list),
+            configuration=UeConfiguration(gnb_search_list=gnb_search_list if 'gnb_search_list' in locals() else "127.0.0.1"),
             message=str(e)
         )
 
@@ -895,11 +1012,11 @@ def list_ues() -> UeListResponse:
     try:
         container_runtime = get_container_runtime()
         terminal_command = [
-            container_runtime, "ps", "-a", "--filter", "label=ueransim.type=ue", 
+            container_runtime, "ps", "-a", "--filter", "name=ue-", 
             "--format", "{{.ID}}|{{.Names}}|{{.Status}}|{{.CreatedAt}}"
         ]
 
-        result = subprocess.run(terminal_command, capture_output=True, text=True)
+        result = run_container_command(terminal_command, capture_output=True, text=True)
         
         if result.returncode != 0:
             return UeListResponse(
@@ -956,7 +1073,7 @@ def delete_ue(container_id_or_name: str) -> UeOperationResponse:
             
         # Stop and remove container
         stop_cmd = [container_runtime, "stop", container_id_or_name]
-        result = subprocess.run(stop_cmd, capture_output=True, text=True)
+        result = run_container_command(stop_cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
             return UeOperationResponse(
@@ -966,7 +1083,7 @@ def delete_ue(container_id_or_name: str) -> UeOperationResponse:
             )
         
         rm_cmd = [container_runtime, "rm", container_id_or_name]
-        result = subprocess.run(rm_cmd, capture_output=True, text=True)
+        result = run_container_command(rm_cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
             return UeOperationResponse(
@@ -1011,7 +1128,7 @@ def get_ue_logs(container_id_or_name: str, lines: int = 100) -> UeOperationRespo
         
         # Execute command to retrieve logs
         terminal_command = [container_runtime, "logs", f"--tail={lines}", container_id_or_name]
-        result = subprocess.run(terminal_command, capture_output=True, text=True)
+        result = run_container_command(terminal_command, capture_output=True, text=True)
         
         if result.returncode != 0:
             return UeOperationResponse(
@@ -1061,57 +1178,85 @@ def attach_ue_to_gnb(ue_container_id_or_name: str, gnb_container_id_or_name: str
         # Get container runtime
         container_runtime = get_container_runtime()
         
-        # Get gNB container IP
-        ip_cmd = [container_runtime, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", gnb_container_id_or_name]
-        ip_result = subprocess.run(ip_cmd, capture_output=True, text=True)
-        
-        if ip_result.returncode != 0:
-            return UeOperationResponse(
-                status="error",
-                message=f"Failed to get gNB IP: {ip_result.stderr}",
-                container=ue_container_id_or_name
-            )
-        
-        gnb_ip = ip_result.stdout.strip()
-        
-        # Update gnbSearchList in UE
-        search_cmd = [
-            container_runtime, "exec", ue_container_id_or_name, 
-            "sed", "-i", f"s/gnbSearchList: .*/gnbSearchList: {gnb_ip}/", 
-            "/etc/ueransim/open5gs-ue.yaml"
+        # Start nr-ue process in UE container using nohup for background execution with logs
+        ue_exec_cmd = [
+            container_runtime, "exec", "-d", ue_container_id_or_name, "sh", "-c",
+            "nohup /usr/local/bin/nr-ue -c /etc/ueransim/open5gs-ue.yaml > /proc/1/fd/1 2>&1 &"
         ]
-        search_result = subprocess.run(search_cmd, capture_output=True, text=True)
+        ue_exec_result = run_container_command(ue_exec_cmd, capture_output=True, text=True)
         
-        if search_result.returncode != 0:
+        if ue_exec_result.returncode != 0:
             return UeOperationResponse(
                 status="error",
-                message=f"Failed to update gnbSearchList: {search_result.stderr}",
+                message=f"Failed to start nr-ue in UE container: {ue_exec_result.stderr}",
                 container=ue_container_id_or_name
             )
         
-        # Add success message to logs
-        log_cmd = [
-            container_runtime, "exec", ue_container_id_or_name, 
-            "sh", "-c", "echo 'Successfully attached to gNB container' >> /var/log/ueransim.log"
-        ]
-        subprocess.run(log_cmd)
+        # Wait a moment for connection to establish
+        time.sleep(3)
         
-        # Restart UE container
-        restart_cmd = [container_runtime, "restart", ue_container_id_or_name]
-        result_restart = subprocess.run(restart_cmd, capture_output=True, text=True)
+        # Check connection status by examining process outputs
+        # Check gNB process output
+        gnb_output_cmd = [container_runtime, "exec", gnb_container_id_or_name, "ps", "aux"]
+        gnb_ps_result = run_container_command(gnb_output_cmd, capture_output=True, text=True)
         
-        if result_restart.returncode != 0:
-            return UeOperationResponse(
-                status="error",
-                message=f"Failed to restart container: {result_restart.stderr}",
-                container=ue_container_id_or_name
-            )
+        # Check UE process output  
+        ue_output_cmd = [container_runtime, "exec", ue_container_id_or_name, "ps", "aux"]
+        ue_ps_result = run_container_command(ue_output_cmd, capture_output=True, text=True)
+        
+        # Get actual process outputs by checking if processes are running
+        gnb_process_running = False
+        ue_process_running = False
+        
+        if gnb_ps_result.returncode == 0 and "nr-gnb" in gnb_ps_result.stdout:
+            gnb_process_running = True
+            
+        if ue_ps_result.returncode == 0 and "nr-ue" in ue_ps_result.stdout:
+            ue_process_running = True
+        
+        # Try to get some output from the processes by checking /tmp or /var/log if available
+        gnb_status_cmd = [container_runtime, "exec", gnb_container_id_or_name, "sh", "-c", "pgrep -f nr-gnb && echo 'gNB process is running' || echo 'gNB process not found'"]
+        gnb_status_result = run_container_command(gnb_status_cmd, capture_output=True, text=True)
+        
+        ue_status_cmd = [container_runtime, "exec", ue_container_id_or_name, "sh", "-c", "pgrep -f nr-ue && echo 'UE process is running' || echo 'UE process not found'"]
+        ue_status_result = run_container_command(ue_status_cmd, capture_output=True, text=True)
+        
+        # Analyze process status
+        connection_success = False
+        connection_details = []
+        
+        if gnb_status_result.returncode == 0:
+            if "process is running" in gnb_status_result.stdout:
+                connection_details.append("gNB: nr-gnb process is active")
+                connection_success = True
+            else:
+                connection_details.append("gNB: nr-gnb process not running")
+        
+        if ue_status_result.returncode == 0:
+            if "process is running" in ue_status_result.stdout:
+                connection_details.append("UE: nr-ue process is active")
+                connection_success = True
+            else:
+                connection_details.append("UE: nr-ue process not running")
+        
+        # Prepare response message
+        status_msg = "Processes are running" if connection_success else "Some processes may not be running"
+        detailed_msg = f"UE container {ue_container_id_or_name} attached to gNB container {gnb_container_id_or_name}. {status_msg}. Details: {'; '.join(connection_details)}"
+        
+        # Combine process outputs for logs
+        process_output = f"gNB process check:\n{gnb_status_result.stdout}\n\nUE process check:\n{ue_status_result.stdout}"
+        if gnb_ps_result.returncode == 0:
+            process_output += f"\n\ngNB processes:\n{gnb_ps_result.stdout}"
+        if ue_ps_result.returncode == 0:
+            process_output += f"\n\nUE processes:\n{ue_ps_result.stdout}"
         
         return UeOperationResponse(
-            status="success",
-            message=f"UE container {ue_container_id_or_name} successfully attached to gNB container {gnb_container_id_or_name} with IP {gnb_ip}",
-            container=ue_container_id_or_name
+            status="success" if connection_success else "warning",
+            message=detailed_msg,
+            container=ue_container_id_or_name,
+            logs=process_output
         )
+        
     except Exception as e:
         return UeOperationResponse(
             status="error",
@@ -1152,7 +1297,7 @@ def edit_exist_container(container_id_or_name: str,
             # Update UE configuration
             config_cmd = [
                 container_runtime, "exec", container_id_or_name,
-                "sed", "-i", f"s/gnbSearchList: .*/gnbSearchList: {config_value}/",
+                "sed", "-i", f"s/- 127\\.0\\.0\\.1/- {config_value}/",
                 "/etc/ueransim/open5gs-ue.yaml"
             ]
         elif config_type == "ngap_ip":
@@ -1184,7 +1329,7 @@ def edit_exist_container(container_id_or_name: str,
             )
         
         # Execute configuration change
-        config_result = subprocess.run(config_cmd, capture_output=True, text=True)
+        config_result = run_container_command(config_cmd, capture_output=True, text=True)
         
         if config_result.returncode != 0:
             return UeOperationResponse(
@@ -1198,14 +1343,14 @@ def edit_exist_container(container_id_or_name: str,
             container_runtime, "exec", container_id_or_name,
             "sh", "-c", f"echo 'Configuration updated: {config_type}={config_value}' >> /var/log/ueransim.log"
         ]
-        subprocess.run(log_cmd)
+        run_container_command(log_cmd)
         
         # Echo success to demonstrate completion
         success_cmd = [
             container_runtime, "exec", container_id_or_name,
             "sh", "-c", "echo 'success'"
         ]
-        success_result = subprocess.run(success_cmd, capture_output=True, text=True)
+        success_result = run_container_command(success_cmd, capture_output=True, text=True)
         
         return UeOperationResponse(
             status="success",
@@ -1231,7 +1376,7 @@ def edit_exist_container(container_id_or_name: str,
         elif "no such file" in error_msg.lower():
             error_msg = "Configuration file not found in container"
         elif "command not found" in error_msg.lower():
-            error_msg = "Container runtime (Docker/nerdctl) not found"
+            error_msg = "Container runtime (Docker) not found"
         
         return UeOperationResponse(
             status="error",

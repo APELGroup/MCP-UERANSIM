@@ -27,12 +27,15 @@ RUN apk add --no-cache \
 
 # Copy executables and configuration files
 COPY --from=builder /opt/UERANSIM/build/nr-gnb /usr/local/bin/
-COPY --from=builder /opt/UERANSIM/config/open5gs-gnb.yaml /etc/ueransim/
+RUN mkdir -p /etc/ueransim
+
+# Copy configuration file
+COPY config/open5gs-gnb.yaml /etc/ueransim/
 
 # Label for container type identification
 LABEL ueransim.type=gnb
 
-# Default values for arguments
+# Default values for environment variables
 ENV LINK_IP="127.0.0.1" \
     NGAP_IP="127.0.0.1" \
     GTP_IP="127.0.0.1" \
@@ -40,7 +43,8 @@ ENV LINK_IP="127.0.0.1" \
     AMF_PORT="38412"
 
 # Script for dynamic configuration
-COPY gnb-entrypoint.sh /usr/local/bin/
+COPY docker/gnb-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/gnb-entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/gnb-entrypoint.sh"]
+# Keep container running without starting UERANSIM automatically
+CMD ["tail", "-f", "/dev/null"]
