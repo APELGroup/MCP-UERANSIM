@@ -1,6 +1,21 @@
 # MCP-UERANSIM
 
-MCP tool to manage simulated gNB and UE resources using UERANSIM
+MCP tool to manage simulated gNB and UE resources using UERANSIM.
+
+This repo is the implementation of paper [5G RAN Simulation Enhancement via the Model Context Protocol](https://ieeexplore.ieee.org/document/11481802). If you find this repo useful please cite the paper using the following:
+
+```
+@INPROCEEDINGS{11481802,
+  author={Brodimas, Dimitrios and Kapolos, Dimitrios and Birbas, Alexios},
+  booktitle={2026 29th Conference on Innovation in Clouds, Internet and Networks (ICIN)}, 
+  title={5G RAN Simulation Enhancement via the Model Context Protocol}, 
+  year={2026},
+  volume={},
+  number={},
+  pages={1-5},
+  keywords={Radio networks;Radio broadcasting;Contacts;5G mobile communication;Communication systems;Computer networks;IP networks;Protocols;Radio access networks;Regional area networks;5G;radio access network;simulation;model context protocol},
+  doi={10.1109/ICIN69025.2026.11481802}}
+```
 
 ## Overview
 
