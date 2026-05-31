@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ue-example
+  namespace: ueransim
+  labels:
+    app: ueransim
+    type: ue
+spec:
+  hostNetwork: true
+  containers:
+    - name: ue
+      image: ghcr.io/apelgroup/mcp-ueransim-new/ueransim-ue:latest
+      imagePullPolicy: IfNotPresent
+      command: ["tail", "-f", "/dev/null"]
+      securityContext:
+        privileged: true
+        capabilities:
+          add: ["NET_ADMIN"]
+      volumeMounts:
+        - name: tun-device
+          mountPath: /dev/net/tun
+  volumes:
+    - name: tun-device
+      hostPath:
+        path: /dev/net/tun
+        type: CharDevice
