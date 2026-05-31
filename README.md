@@ -42,7 +42,15 @@ MCP-UERANSIM/
 │   ├── gnb-pod-example.yaml       # Reference gNB pod spec
 │   └── ue-pod-example.yaml        # Reference UE pod spec
 └── ueransim_mcp/
-    └── server.py                  # MCP server — all 24 tools
+    ├── server.py                  # Entry point — registers tools, calls mcp.run()
+    ├── app.py                     # FastMCP instance shared by all tool modules
+    ├── models.py                  # Pydantic response models (gNB + UE)
+    ├── validators.py              # IP and name validation helpers
+    ├── utils.py                   # generate_random_suffix
+    ├── docker_utils.py            # Docker runtime helpers + validate_existing_container
+    ├── docker_tools.py            # 12 Docker @mcp.tool() functions
+    ├── k8s_utils.py               # Kubernetes client helpers
+    └── k8s_tools.py               # 12 Kubernetes @mcp.tool() functions
 ```
 
 ## Available Tools
