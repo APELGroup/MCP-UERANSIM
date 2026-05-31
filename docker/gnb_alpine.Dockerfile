@@ -42,7 +42,14 @@ ENV LINK_IP="127.0.0.1" \
     NGAP_IP="127.0.0.1" \
     GTP_IP="127.0.0.1" \
     AMF_ADDRESS="127.0.0.5" \
-    AMF_PORT="38412"
+    AMF_PORT="38412" \
+    MCC="999" \
+    MNC="70" \
+    TAC="1" \
+    SLICE_SST="1" \
+    SLICE_SD="" \
+    CELL_ACCESS_TYPE="nr" \
+    IGNORE_STREAM_IDS="true"
 
 # Script for dynamic configuration
 COPY docker/gnb-entrypoint.sh /usr/local/bin/

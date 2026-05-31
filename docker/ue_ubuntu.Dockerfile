@@ -28,10 +28,14 @@ RUN make
 FROM ubuntu:22.04
 
 # Install only runtime dependencies
+# procps: provides pgrep (used by MCP server for process status checks)
+# mawk:   provides awk  (used by MCP server for slice/config block rewrites)
 RUN apt-get update && apt-get install -y \
     libsctp-dev \
     lksctp-tools \
     iproute2 \
+    procps \
+    mawk \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /usr/share/doc/* \
     && rm -rf /usr/share/man/* \
@@ -48,8 +52,18 @@ COPY config/open5gs-ue.yaml /etc/ueransim/
 # Label for container type identification
 LABEL ueransim.type=ue
 
-# Default value για GNB_SEARCH_LIST
-ENV GNB_SEARCH_LIST="127.0.0.1"
+# Default values for environment variables
+ENV GNB_SEARCH_LIST="127.0.0.1" \
+    SUPI="" \
+    MCC="999" \
+    MNC="70" \
+    KEY="" \
+    OP="" \
+    OP_TYPE="OPC" \
+    SLICE_SST="1" \
+    SLICE_SD="" \
+    SESSION_APN="internet" \
+    TUN_NETMASK="255.255.255.0"
 
 # Script for dynamic configuration (available for manual use)
 COPY docker/ue-entrypoint.sh /usr/local/bin/

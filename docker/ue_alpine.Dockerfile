@@ -37,8 +37,18 @@ COPY config/open5gs-ue.yaml /etc/ueransim/
 # Label for container type identification
 LABEL ueransim.type=ue
 
-# Default value for GNB_SEARCH_LIST
-ENV GNB_SEARCH_LIST="127.0.0.1"
+# Default values for environment variables
+ENV GNB_SEARCH_LIST="127.0.0.1" \
+    SUPI="" \
+    MCC="999" \
+    MNC="70" \
+    KEY="" \
+    OP="" \
+    OP_TYPE="OPC" \
+    SLICE_SST="1" \
+    SLICE_SD="" \
+    SESSION_APN="internet" \
+    TUN_NETMASK="255.255.255.0"
 
 # Script for dynamic configuration
 COPY docker/ue-entrypoint.sh /usr/local/bin/

@@ -28,10 +28,14 @@ RUN make
 FROM ubuntu:22.04
 
 # Install only runtime dependencies
+# procps: provides pgrep (used by MCP server for process status checks)
+# mawk:   provides awk  (used by MCP server for slice/config block rewrites)
 RUN apt-get update && apt-get install -y \
     libsctp-dev \
     lksctp-tools \
     iproute2 \
+    procps \
+    mawk \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /usr/share/doc/* \
     && rm -rf /usr/share/man/* \
@@ -48,12 +52,19 @@ COPY config/open5gs-gnb.yaml /etc/ueransim/
 # Label for container type identification
 LABEL ueransim.type=gnb
 
-# Default values για environment variables
+# Default values for environment variables
 ENV LINK_IP="127.0.0.1" \
     NGAP_IP="127.0.0.1" \
     GTP_IP="127.0.0.1" \
     AMF_ADDRESS="127.0.0.5" \
-    AMF_PORT="38412"
+    AMF_PORT="38412" \
+    MCC="999" \
+    MNC="70" \
+    TAC="1" \
+    SLICE_SST="1" \
+    SLICE_SD="" \
+    CELL_ACCESS_TYPE="nr" \
+    IGNORE_STREAM_IDS="true"
 
 # Script for dynamic configuration (available for manual use)
 COPY docker/gnb-entrypoint.sh /usr/local/bin/
