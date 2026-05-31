@@ -21,13 +21,10 @@ print("UERANSIM MCP Server initialized", file=sys.stderr)
 
 def get_container_runtime():
     """Get Docker as the container runtime.
-    
+
     Returns:
         str: "docker"
     """
-    import os
-    
-    # Try docker
     try:
         result = subprocess.run(["docker", "version"], capture_output=True, text=True)
         if result.returncode == 0:
@@ -38,9 +35,6 @@ def get_container_runtime():
     except FileNotFoundError:
         print("docker not found", file=sys.stderr)
         raise RuntimeError("Docker is not installed or not in PATH")
-    
-    # If docker doesn't work, raise error
-    raise RuntimeError("Docker container runtime is required")
 
 def generate_random_suffix(length: int = 4) -> str:
     """Generate a random alphanumeric suffix for container names.
@@ -55,33 +49,27 @@ def generate_random_suffix(length: int = 4) -> str:
 
 def run_container_command(command: List[str], **kwargs) -> subprocess.CompletedProcess:
     """Run a Docker command with proper environment setup.
-    
+
     Args:
         command: List of command parts
         **kwargs: Additional arguments to pass to subprocess.run
-        
+
     Returns:
         CompletedProcess: Result of the command execution
     """
-    import os
-    
-    # Set up basic environment
     env = os.environ.copy()
-    
-    # Add PATH from current environment to ensure docker is found
+
     if 'PATH' not in env:
         env['PATH'] = '/usr/local/bin:/usr/bin:/bin'
     else:
-        # Ensure common bin directories are in PATH
         path_dirs = env['PATH'].split(':')
-        for directory in ['/usr/local/bin', '/usr/bin', '/bin', '/home/dkap/.local/bin']:
+        for directory in ['/usr/local/bin', '/usr/bin', '/bin']:
             if directory not in path_dirs:
                 env['PATH'] = f"{directory}:{env['PATH']}"
-    
-    # Add env to kwargs if not already specified
+
     if 'env' not in kwargs:
         kwargs['env'] = env
-    
+
     return subprocess.run(command, **kwargs)
 
 def detect_image_os(image_name: str) -> str:
@@ -141,9 +129,9 @@ def validate_container_id(container_id: str) -> bool:
     Raises:
         ValueError: If the container ID is not valid
     """
-    # Container IDs should be only numbers as per requirements
-    if not container_id.isdigit():
-        raise ValueError(f"Invalid container ID: {container_id}. Must contain only numbers.")
+    # Docker container IDs are hexadecimal strings
+    if not re.match(r'^[0-9a-fA-F]+$', container_id):
+        raise ValueError(f"Invalid container ID: {container_id}. Must be a hexadecimal string.")
     
     return True
 
@@ -190,7 +178,7 @@ def validate_existing_container(container_id_or_name: str) -> bool:
     """
     try:
         # First validate the format
-        if container_id_or_name.isdigit() and (len(container_id_or_name) == 12 or len(container_id_or_name) == 64):
+        if re.match(r'^[0-9a-fA-F]+$', container_id_or_name) and (len(container_id_or_name) == 12 or len(container_id_or_name) == 64):
             validate_container_id(container_id_or_name)
         else:
             # Basic name validation without prefix since we don't know the type
@@ -447,10 +435,10 @@ def create_gnb(amf_address: str = "127.0.0.5",
                 message=f"Failed to update gtpIp: {gtp_result.stderr}"
             )
         
-        # Update AMF address
+        # Update AMF address (matches the "- address: ..." line inside amfConfigs)
         amf_cmd = [
             container_runtime, "exec", container_id,
-            "sed", "-i", f"s/amfConfigs:.*address: .*/amfConfigs:\\n  - address: {amf_address}/",
+            "sed", "-i", f"s/- address: .*/- address: {amf_address}/",
             "/etc/ueransim/open5gs-gnb.yaml"
         ]
         amf_result = run_container_command(amf_cmd, capture_output=True, text=True)
@@ -590,7 +578,7 @@ def delete_gnb(container_id_or_name: str) -> GnbOperationResponse:
     """
     try:
         # Check if it's ID or name
-        if container_id_or_name.isdigit() and len(container_id_or_name) == 12 or len(container_id_or_name) == 64:
+        if re.match(r'^[0-9a-fA-F]+$', container_id_or_name) and (len(container_id_or_name) == 12 or len(container_id_or_name) == 64):
             validate_container_id(container_id_or_name)
         else:
             validate_container_name(container_id_or_name, "gnb")
@@ -661,7 +649,7 @@ def get_gnb_logs(container_id_or_name: str, lines: int = 100) -> GnbOperationRes
     """
     try:
         # Check if it's ID or name
-        if container_id_or_name.isdigit() and len(container_id_or_name) == 12 or len(container_id_or_name) == 64:
+        if re.match(r'^[0-9a-fA-F]+$', container_id_or_name) and (len(container_id_or_name) == 12 or len(container_id_or_name) == 64):
             validate_container_id(container_id_or_name)
         else:
             validate_container_name(container_id_or_name, "gnb")
@@ -695,12 +683,12 @@ def get_gnb_logs(container_id_or_name: str, lines: int = 100) -> GnbOperationRes
 
 
 @mcp.tool()
-def attach_gnb_to_core(container_id_or_name: str, amf_address: str = "192.168.188.205") -> GnbOperationResponse:
+def attach_gnb_to_core(container_id_or_name: str, amf_address: str = "127.0.0.5") -> GnbOperationResponse:
     """Attach a gNB container to the network core.
     
     Args:
         container_id_or_name: gNB container ID or name
-        amf_address: AMF IP address (default: 192.168.188.205)
+        amf_address: AMF IP address (default: 127.0.0.5)
         
     Returns:
         GnbOperationResponse: Connection status
@@ -710,7 +698,7 @@ def attach_gnb_to_core(container_id_or_name: str, amf_address: str = "192.168.18
         validate_ip(amf_address)
         
         # Check if it's ID or name
-        if container_id_or_name.isdigit() and len(container_id_or_name) == 12 or len(container_id_or_name) == 64:
+        if re.match(r'^[0-9a-fA-F]+$', container_id_or_name) and (len(container_id_or_name) == 12 or len(container_id_or_name) == 64):
             validate_container_id(container_id_or_name)
         else:
             validate_container_name(container_id_or_name, "gnb")
@@ -1034,7 +1022,7 @@ def delete_ue(container_id_or_name: str) -> UeOperationResponse:
     """
     try:
         # Check if it's ID or name
-        if container_id_or_name.isdigit() and len(container_id_or_name) == 12 or len(container_id_or_name) == 64:
+        if re.match(r'^[0-9a-fA-F]+$', container_id_or_name) and (len(container_id_or_name) == 12 or len(container_id_or_name) == 64):
             validate_container_id(container_id_or_name)
         else:
             validate_container_name(container_id_or_name, "ue")
@@ -1089,7 +1077,7 @@ def get_ue_logs(container_id_or_name: str, lines: int = 100) -> UeOperationRespo
     """
     try:
         # Check if it's ID or name
-        if container_id_or_name.isdigit() and len(container_id_or_name) == 12 or len(container_id_or_name) == 64:
+        if re.match(r'^[0-9a-fA-F]+$', container_id_or_name) and (len(container_id_or_name) == 12 or len(container_id_or_name) == 64):
             validate_container_id(container_id_or_name)
         else:
             validate_container_name(container_id_or_name, "ue")
@@ -1135,20 +1123,44 @@ def attach_ue_to_gnb(ue_container_id_or_name: str, gnb_container_id_or_name: str
     """
     try:
         # Check if it's ID or name for UE
-        if ue_container_id_or_name.isdigit() and len(ue_container_id_or_name) == 12 or len(ue_container_id_or_name) == 64:
+        if re.match(r'^[0-9a-fA-F]+$', ue_container_id_or_name) and (len(ue_container_id_or_name) == 12 or len(ue_container_id_or_name) == 64):
             validate_container_id(ue_container_id_or_name)
         else:
             validate_container_name(ue_container_id_or_name, "ue")
-            
+
         # Check if it's ID or name for gNB
-        if gnb_container_id_or_name.isdigit() and len(gnb_container_id_or_name) == 12 or len(gnb_container_id_or_name) == 64:
+        if re.match(r'^[0-9a-fA-F]+$', gnb_container_id_or_name) and (len(gnb_container_id_or_name) == 12 or len(gnb_container_id_or_name) == 64):
             validate_container_id(gnb_container_id_or_name)
         else:
             validate_container_name(gnb_container_id_or_name, "gnb")
         
         # Get container runtime
         container_runtime = get_container_runtime()
-        
+
+        # Retrieve the gNB container's IP and update the UE's gnbSearchList so it
+        # actually connects to the specified gNB
+        gnb_ip_result = inspect_container_ip(gnb_container_id_or_name)
+        if gnb_ip_result.status != "success" or not gnb_ip_result.logs:
+            return UeOperationResponse(
+                status="error",
+                message=f"Could not determine IP for gNB container {gnb_container_id_or_name}: {gnb_ip_result.message}",
+                container=ue_container_id_or_name
+            )
+        gnb_ip = gnb_ip_result.logs.strip()
+
+        update_cmd = [
+            container_runtime, "exec", ue_container_id_or_name,
+            "sed", "-i", f"s/- .*/- {gnb_ip}/",
+            "/etc/ueransim/open5gs-ue.yaml"
+        ]
+        update_result = run_container_command(update_cmd, capture_output=True, text=True)
+        if update_result.returncode != 0:
+            return UeOperationResponse(
+                status="error",
+                message=f"Failed to update gnbSearchList with gNB IP {gnb_ip}: {update_result.stderr}",
+                container=ue_container_id_or_name
+            )
+
         # Start nr-ue process in UE container using nohup for background execution with logs
         ue_exec_cmd = [
             container_runtime, "exec", "-d", ue_container_id_or_name, "sh", "-c",
@@ -1286,10 +1298,10 @@ def edit_exist_container(container_id_or_name: str,
                 "/etc/ueransim/open5gs-gnb.yaml"
             ]
         elif config_type == "amf_ip":
-            # Update gNB AMF IP address
+            # Update gNB AMF IP address (matches the "- address: ..." line inside amfConfigs)
             config_cmd = [
                 container_runtime, "exec", container_id_or_name,
-                "sed", "-i", f"s/amfConfigs:.*address: .*/amfConfigs:\\n  - address: {config_value}/",
+                "sed", "-i", f"s/- address: .*/- address: {config_value}/",
                 "/etc/ueransim/open5gs-gnb.yaml"
             ]
         else:
