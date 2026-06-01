@@ -29,6 +29,7 @@ def gnb_config_cmds(
     cell_access_type: str = "nr",
     gtp_advertise_ip: Optional[str] = None,
     ignore_stream_ids: bool = True,
+    amf_port: Optional[str] = None,
 ) -> List[List[str]]:
     """Return ordered commands to configure a gNB container/pod.
 
@@ -47,6 +48,9 @@ def gnb_config_cmds(
         ["sed", "-i", f"s/^cellAccessType: .*/cellAccessType: {cell_access_type}/", f],
         ["sed", "-i", f"s/^ignoreStreamIds: .*/ignoreStreamIds: {ignore}/", f],
     ]
+
+    if amf_port is not None:
+        cmds.append(["sed", "-i", f"s/    port: .*/    port: {amf_port}/", f])
 
     # Replace the entire slices: block with the new sst (+ optional sd)
     cmds += gnb_slice_cmds(slice_sst, slice_sd)

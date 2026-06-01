@@ -169,6 +169,7 @@ def create_gnb(
             cell_access_type=cell_access_type,
             gtp_advertise_ip=gtp_advertise_ip,
             ignore_stream_ids=ignore_stream_ids,
+            amf_port=amf_port,
         ):
             r = _exec(runtime, container_id, cmd)
             if r.returncode != 0:

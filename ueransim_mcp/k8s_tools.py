@@ -144,6 +144,7 @@ def k8s_create_gnb(
             cell_access_type=cell_access_type,
             gtp_advertise_ip=gtp_advertise_ip,
             ignore_stream_ids=ignore_stream_ids,
+            amf_port=amf_port,
         ):
             exec_in_pod(v1, pod_name, namespace, cmd)
 
