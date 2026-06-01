@@ -17,8 +17,8 @@ ueransim_mcp/
   config_ops.py   — returns List[List[str]] sed/awk commands; shared by Docker and K8s tools
   docker_utils.py — get_container_runtime, run_container_command, detect_image_os, get_container_name
   docker_tools.py — 12 Docker @mcp.tool() functions
-  k8s_utils.py    — get_k8s_client, exec_in_pod, wait_for_pod_running
-  k8s_tools.py    — 12 Kubernetes @mcp.tool() functions
+  k8s_utils.py    — get_k8s_client(kubeconfig=""), exec_in_pod, wait_for_pod_running
+  k8s_tools.py    — 12 Kubernetes @mcp.tool() functions (all accept kubeconfig: str = "")
 
 config/           — UERANSIM YAML templates (open5gs-gnb.yaml, open5gs-ue.yaml)
 docker/           — Dockerfiles (gnb/ue × ubuntu/alpine) + entrypoint scripts
@@ -44,10 +44,11 @@ Images are stored in GHCR under `ghcr.io/apelgroup/mcp-ueransim-new/`.
 
 ## Kubernetes cluster
 
-- Single-node cluster at `192.168.188.210:6443` (node: `coppilot-server`)
+- Default cluster: single-node at `192.168.188.210:6443` (node: `coppilot-server`)
 - Namespace: `ueransim` (apply `k8s/namespace.yaml` if missing)
 - GHCR pull secret: `ghcr-pull-secret` (already created in `ueransim` namespace)
 - Always pass `image_pull_secret='ghcr-pull-secret'` to `k8s_create_gnb` / `k8s_create_ue`
+- To target a different cluster, pass `kubeconfig='/path/to/cluster.yaml'` to any K8s tool. Priority: explicit kubeconfig > in-cluster config > default `~/.kube/config`.
 
 ## Key design decisions
 

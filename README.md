@@ -86,34 +86,34 @@ MCP-UERANSIM/
 
 ### Kubernetes Tools
 
-All Kubernetes tools mirror their Docker counterparts and default to the `ueransim` namespace.
+All Kubernetes tools mirror their Docker counterparts and default to the `ueransim` namespace. Every tool also accepts an optional `kubeconfig` parameter to target a specific cluster (see [Multi-cluster support](#multi-cluster-support)).
 
 #### gNB
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `k8s_create_gnb` | Create a gNB pod | `amf_address`, `amf_port`, `pod_name`, `namespace`, `gnb_image`, `image_pull_secret` |
-| `k8s_list_gnbs` | List all gNB pods | `namespace` |
-| `k8s_delete_gnb` | Delete a gNB pod | `pod_name`, `namespace` |
-| `k8s_get_gnb_logs` | Get logs from a gNB pod | `pod_name`, `lines`, `namespace` |
-| `k8s_attach_gnb_to_core` | Start nr-gnb and connect to AMF | `pod_name`, `amf_address`, `namespace` |
+| `k8s_create_gnb` | Create a gNB pod | `amf_address`, `amf_port`, `pod_name`, `namespace`, `gnb_image`, `image_pull_secret`, `kubeconfig` |
+| `k8s_list_gnbs` | List all gNB pods | `namespace`, `kubeconfig` |
+| `k8s_delete_gnb` | Delete a gNB pod | `pod_name`, `namespace`, `kubeconfig` |
+| `k8s_get_gnb_logs` | Get logs from a gNB pod | `pod_name`, `lines`, `namespace`, `kubeconfig` |
+| `k8s_attach_gnb_to_core` | Start nr-gnb and connect to AMF | `pod_name`, `amf_address`, `namespace`, `kubeconfig` |
 
 #### UE
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `k8s_create_ue` | Create a UE pod | `gnb_search_list`, `pod_name`, `namespace`, `ue_image`, `image_pull_secret` |
-| `k8s_list_ues` | List all UE pods | `namespace` |
-| `k8s_delete_ue` | Delete a UE pod | `pod_name`, `namespace` |
-| `k8s_get_ue_logs` | Get logs from a UE pod | `pod_name`, `lines`, `namespace` |
-| `k8s_attach_ue_to_gnb` | Start nr-ue and connect to gNB | `ue_pod_name`, `gnb_pod_name`, `namespace` |
+| `k8s_create_ue` | Create a UE pod | `gnb_search_list`, `pod_name`, `namespace`, `ue_image`, `image_pull_secret`, `kubeconfig` |
+| `k8s_list_ues` | List all UE pods | `namespace`, `kubeconfig` |
+| `k8s_delete_ue` | Delete a UE pod | `pod_name`, `namespace`, `kubeconfig` |
+| `k8s_get_ue_logs` | Get logs from a UE pod | `pod_name`, `lines`, `namespace`, `kubeconfig` |
+| `k8s_attach_ue_to_gnb` | Start nr-ue and connect to gNB | `ue_pod_name`, `gnb_pod_name`, `namespace`, `kubeconfig` |
 
 #### Common
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `k8s_inspect_pod_ip` | Get a pod's IP address | `pod_name`, `namespace` |
-| `k8s_edit_pod_config` | Edit config in a running pod | `pod_name`, `config_type`, `config_value`, `namespace` |
+| `k8s_inspect_pod_ip` | Get a pod's IP address | `pod_name`, `namespace`, `kubeconfig` |
+| `k8s_edit_pod_config` | Edit config in a running pod | `pod_name`, `config_type`, `config_value`, `namespace`, `kubeconfig` |
 
 ## Installation
 
@@ -244,6 +244,22 @@ k8s_attach_ue_to_gnb(
 # 3. Monitor
 k8s_get_gnb_logs(pod_name=gnb.container_name, lines=50)
 k8s_get_ue_logs(pod_name=ue.container_name, lines=50)
+```
+
+### Multi-cluster support
+
+Every K8s tool accepts an optional `kubeconfig` parameter pointing to a kubeconfig file. When omitted the tool falls back to in-cluster config, then `~/.kube/config`.
+
+```python
+# gNB on cluster A, UE on cluster B
+gnb = k8s_create_gnb(
+    amf_address="192.168.100.1",
+    kubeconfig="/path/to/cluster-a.yaml",
+)
+ue = k8s_create_ue(
+    gnb_search_list=gnb_ip,
+    kubeconfig="/path/to/cluster-b.yaml",
+)
 ```
 
 ### Pod specifications
