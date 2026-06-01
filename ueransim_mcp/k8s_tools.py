@@ -458,7 +458,8 @@ def k8s_create_ue(
 
         # Update gnbSearchList
         exec_in_pod(v1, pod_name, namespace,
-                    ["sed", "-i", f"s/- 127\\.0\\.0\\.1/- {gnb_search_list}/", UE_CFG])
+                    ["sh", "-c",
+                     f"sed -i '/^gnbSearchList:/{{n; s/  - .*/  - {gnb_search_list}/;}}' {UE_CFG}"])
 
         # Apply additional parametric config
         for cmd in ue_config_cmds(
@@ -608,7 +609,8 @@ def k8s_attach_ue_to_gnb(
         gnb_ip = gnb_ip_result.logs.strip()
 
         exec_in_pod(v1, ue_pod_name, namespace,
-                    ["sed", "-i", f"s/- .*/- {gnb_ip}/", UE_CFG])
+                    ["sh", "-c",
+                     f"sed -i '/^gnbSearchList:/{{n; s/  - .*/  - {gnb_ip}/;}}' {UE_CFG}"])
         exec_in_pod(v1, ue_pod_name, namespace,
                     ["sh", "-c",
                      "nohup /usr/local/bin/nr-ue -c /etc/ueransim/open5gs-ue.yaml"
@@ -740,8 +742,8 @@ def _k8s_edit_commands(config_type: str, config_value: str, ctype: str):
         "gtp_advertise_ip": gnb_gtp_advertise_cmds(config_value),
     }
     _ue_map = {
-        "gnb_search_list":  [["sed", "-i",
-                               f"s/^  - [0-9].*/  - {config_value}/", f_ue]],
+        "gnb_search_list":  [["sh", "-c",
+                               f"sed -i '/^gnbSearchList:/{{n; s/  - .*/  - {config_value}/;}}' {f_ue}"]],
         "supi":             [["sed", "-i", f"s/^supi: .*/supi: '{config_value}'/", f_ue]],
         "key":              [["sed", "-i", f"s/^key: .*/key: '{config_value}'/", f_ue]],
         "op":               [["sed", "-i", f"s/^op: .*/op: '{config_value}'/", f_ue]],

@@ -488,7 +488,8 @@ def create_ue(
 
         # Update gnbSearchList
         r = _exec(runtime, container_id,
-                  ["sed", "-i", f"s/- 127\\.0\\.0\\.1/- {gnb_search_list}/", UE_CFG])
+                  ["sh", "-c",
+                   f"sed -i '/^gnbSearchList:/{{n; s/  - .*/  - {gnb_search_list}/;}}' {UE_CFG}"])
         if r.returncode != 0:
             return UeCreateResponse(
                 status="error", container_id=container_id, container_name=container_name,
@@ -646,7 +647,8 @@ def attach_ue_to_gnb(
         gnb_ip = gnb_ip_result.logs.strip()
 
         r = _exec(runtime, ue_container_id_or_name,
-                  ["sed", "-i", f"s/- .*/- {gnb_ip}/", UE_CFG])
+                  ["sh", "-c",
+                   f"sed -i '/^gnbSearchList:/{{n; s/  - .*/  - {gnb_ip}/;}}' {UE_CFG}"])
         if r.returncode != 0:
             return UeOperationResponse(
                 status="error",
@@ -795,8 +797,8 @@ def _edit_commands(config_type: str, config_value: str, ctype: str):
 
     # UE-only types
     _ue_map = {
-        "gnb_search_list":  [["sed", "-i",
-                               f"s/^  - [0-9].*/  - {config_value}/", f_ue]],
+        "gnb_search_list":  [["sh", "-c",
+                               f"sed -i '/^gnbSearchList:/{{n; s/  - .*/  - {config_value}/;}}' {f_ue}"]],
         "supi":             [["sed", "-i", f"s/^supi: .*/supi: '{config_value}'/", f_ue]],
         "key":              [["sed", "-i", f"s/^key: .*/key: '{config_value}'/", f_ue]],
         "op":               [["sed", "-i", f"s/^op: .*/op: '{config_value}'/", f_ue]],
